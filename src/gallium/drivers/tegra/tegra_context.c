@@ -496,6 +496,33 @@ tegra_set_framebuffer_state(struct pipe_context *pcontext,
                             const struct pipe_framebuffer_state *fb)
 {
    struct tegra_context *context = to_tegra_context(pcontext);
+   struct pipe_framebuffer_state state;
+   unsigned i;
+
+   /*
+    * fb->cbufs[]/zsbuf/resolve carry pipe_resource pointers that may be
+    * tegra_resource wrappers (e.g. scanout-capable buffers allocated via
+    * the tegra pipe_screen, such as glamor's window-system render
+    * target). The real nvc0/nv50 driver below has no notion of
+    * tegra_resource and will reinterpret it as a bare nv04_resource,
+    * reading garbage out of tegra_resource::modifier as if it were
+    * nv04_resource::bo. Unwrap to the real GPU-side resource first, the
+    * same way every other resource-touching hook in this file already
+    * does (see tegra_draw_vbo, tegra_set_constant_buffer, etc).
+    */
+   if (fb) {
+      state = *fb;
+
+      for (i = 0; i < fb->nr_cbufs; i++)
+         state.cbufs[i].texture = tegra_resource_unwrap(fb->cbufs[i].texture);
+      for (; i < PIPE_MAX_COLOR_BUFS; i++)
+         state.cbufs[i].texture = NULL;
+
+      state.zsbuf.texture = tegra_resource_unwrap(fb->zsbuf.texture);
+      state.resolve = tegra_resource_unwrap(fb->resolve);
+
+      fb = &state;
+   }
 
    context->gpu->set_framebuffer_state(context->gpu, fb);
 }
