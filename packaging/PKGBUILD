@@ -256,7 +256,7 @@ build () {
         -D b_ndebug=true
         -D b_lto=false
         -D egl=enabled
-        -D gallium-drivers=nouveau,tegra
+        -D gallium-drivers=nouveau,tegra,llvmpipe
         -D gallium-extra-hud=true
         -D gallium-rusticl=${_rusticl}
         -D gallium-va=enabled
