@@ -1,0 +1,67 @@
+name: Arch Linux ARMv7h CI
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archlinux-armv7h:
+    runs-on: ubuntu-26.04-arm
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # No need to checkout the repository here.
+
+      - name: Install dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y docker.io wget tar
+
+      - name: Fetch PKGBUILD inputs
+        run: |
+          set -euxo pipefail
+          install -d "$GITHUB_WORKSPACE/packaging"
+          wget -O /tmp/mesa-git.tar.gz 'https://aur.archlinux.org/cgit/aur.git/snapshot/mesa-git.tar.gz'
+          tar -xzf /tmp/mesa-git.tar.gz -C "$GITHUB_WORKSPACE/packaging" --strip-components=1
+          wget -O "$GITHUB_WORKSPACE/packaging/PKGBUILD" 'https://raw.githubusercontent.com/JordanViknar/mesa-tegra/refs/heads/tegra-fixes/packaging/PKGBUILD'
+
+      - name: Build inside ARMv7 container
+        run: |
+          set -euxo pipefail
+          docker run --rm --platform linux/arm/v7 \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work/packaging \
+            menci/archlinuxarm:base-devel \
+            bash -lc '
+              set -euxo pipefail
+              grep -qxF "DisableSandbox" /etc/pacman.conf || sed -i "/^\[options\]/a DisableSandbox" /etc/pacman.conf
+              pacman -Sy --noconfirm --needed archlinuxarm-keyring wget tar sudo
+              useradd -m build -G wheel
+              install -d -m 0755 /etc/sudoers.d
+              printf "%%wheel ALL=(ALL:ALL) NOPASSWD: ALL\n" > /etc/sudoers.d/build
+              chmod 0440 /etc/sudoers.d/build
+              chown -R build:build /work
+              su build -c "cd /work/packaging && makepkg --syncdeps --noconfirm --cleanbuild --clean --log --ignorearch"
+              chown -R root:root /work
+              chmod -R 777 /work
+            '
+
+      - name: Collect artifacts
+        if: always()
+        run: |
+          set -euxo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          find "$GITHUB_WORKSPACE/packaging" -maxdepth 1 -type f \( -name '*.pkg.tar.*' \) -exec cp -t "$GITHUB_WORKSPACE/artifacts" {} +
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: archlinux-armv7h-pkg
+          path: artifacts/
+          retention-days: 7
