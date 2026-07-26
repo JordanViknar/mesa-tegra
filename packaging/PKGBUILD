@@ -18,7 +18,7 @@ pkgname=mesa-tegra-git
 pkgdesc="an open-source implementation of the OpenGL specification, git version"
 pkgver=26.2.0_devel.223596.f1c30d65e15.d41d8cd
 pkgrel=1
-arch=('x86_64')
+arch=('armv7h' 'aarch64')
 makedepends=(
     'git'
     'xorgproto'

@@ -27,29 +27,66 @@ jobs:
         run: |
           set -euxo pipefail
           install -d "$GITHUB_WORKSPACE/packaging"
+
+          # Pull the mesa-git AUR snapshot, which contains related files
           wget -O /tmp/mesa-git.tar.gz 'https://aur.archlinux.org/cgit/aur.git/snapshot/mesa-git.tar.gz'
           tar -xzf /tmp/mesa-git.tar.gz -C "$GITHUB_WORKSPACE/packaging" --strip-components=1
-          wget -O "$GITHUB_WORKSPACE/packaging/PKGBUILD" 'https://raw.githubusercontent.com/JordanViknar/mesa-tegra/refs/heads/tegra-fixes/packaging/PKGBUILD'
+
+          # Pull the PKGBUILD from whichever branch actually triggered this run
+          wget -O "$GITHUB_WORKSPACE/packaging/PKGBUILD" \
+            "https://raw.githubusercontent.com/JordanViknar/mesa-tegra/refs/heads/${GITHUB_REF_NAME}/packaging/PKGBUILD"
+
+          # Pin the PKGBUILD's own mesa source to the exact commit and branch
+          sed -i "s|#branch=tegra-fixes|#commit=${GITHUB_SHA}|" "$GITHUB_WORKSPACE/packaging/PKGBUILD"
+
+      - name: Restore ccache / pacman package cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/mesa-tegra-ci/ccache
+            ~/.cache/mesa-tegra-ci/pacman-pkg
+          key: mesa-tegra-armv7h-${{ github.sha }}
+          restore-keys: |
+            mesa-tegra-armv7h-
 
       - name: Build inside ARMv7 container
+        env:
+          MESA_WHICH_LLVM: '4'
         run: |
           set -euxo pipefail
+          mkdir -p ~/.cache/mesa-tegra-ci/ccache ~/.cache/mesa-tegra-ci/pacman-pkg
+
           docker run --rm --platform linux/arm/v7 \
+            -e MESA_WHICH_LLVM \
             -v "$GITHUB_WORKSPACE:/work" \
+            -v "$HOME/.cache/mesa-tegra-ci/ccache:/home/build/.cache/ccache" \
+            -v "$HOME/.cache/mesa-tegra-ci/pacman-pkg:/var/cache/pacman/pkg" \
             -w /work/packaging \
             menci/archlinuxarm:base-devel \
+            \
             bash -lc '
               set -euxo pipefail
+              
+              # Disable sandboxing
               grep -qxF "DisableSandbox" /etc/pacman.conf || sed -i "/^\[options\]/a DisableSandbox" /etc/pacman.conf
-              pacman -Sy --noconfirm --needed archlinuxarm-keyring wget tar sudo
+
+              # Enable ccache
+              sed -i "s/!ccache/ccache/" /etc/makepkg.conf
+
+              # Install dependencies
+              pacman -Sy --noconfirm --needed archlinuxarm-keyring wget tar sudo ccache
+
+              # Create a build user with sudo privileges
               useradd -m build -G wheel
               install -d -m 0755 /etc/sudoers.d
               printf "%%wheel ALL=(ALL:ALL) NOPASSWD: ALL\n" > /etc/sudoers.d/build
               chmod 0440 /etc/sudoers.d/build
-              chown -R build:build /work
-              su build -c "cd /work/packaging && makepkg --syncdeps --noconfirm --cleanbuild --clean --log --ignorearch"
-              chown -R root:root /work
-              chmod -R 777 /work
+
+              chown -R build:build /work /home/build/.cache/ccache
+
+              su build -c "cd /work/packaging && MESA_WHICH_LLVM=$MESA_WHICH_LLVM makepkg --syncdeps --noconfirm --cleanbuild --clean --log --ignorearch"
+              
+              chown -R 1001:1001 /work /home/build/.cache/ccache
             '
 
       - name: Collect artifacts
