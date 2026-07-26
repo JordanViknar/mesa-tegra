@@ -762,9 +762,18 @@ tegra_clear_render_target(struct pipe_context *pcontext,
                           bool render_condition)
 {
    struct tegra_context *context = to_tegra_context(pcontext);
-   struct tegra_surface *dst = to_tegra_surface(pdst);
+   struct pipe_surface dst;
 
-   context->gpu->clear_render_target(context->gpu, dst->gpu, color, dstx,
+   /*
+    * pipe_surface is a plain value type these days (see p_state.h); it is
+    * no longer allocated via a driver create_surface() hook, so there is
+    * no tegra_surface wrapper to unwrap here. Only the pipe_resource it
+    * points at can be a tegra_resource.
+    */
+   dst = *pdst;
+   dst.texture = tegra_resource_unwrap(pdst->texture);
+
+   context->gpu->clear_render_target(context->gpu, &dst, color, dstx,
                                      dsty, width, height, render_condition);
 }
 
@@ -781,9 +790,13 @@ tegra_clear_depth_stencil(struct pipe_context *pcontext,
                           bool render_condition)
 {
    struct tegra_context *context = to_tegra_context(pcontext);
-   struct tegra_surface *dst = to_tegra_surface(pdst);
+   struct pipe_surface dst;
 
-   context->gpu->clear_depth_stencil(context->gpu, dst->gpu, flags, depth,
+   /* see comment in tegra_clear_render_target() */
+   dst = *pdst;
+   dst.texture = tegra_resource_unwrap(pdst->texture);
+
+   context->gpu->clear_depth_stencil(context->gpu, &dst, flags, depth,
                                      stencil, dstx, dsty, width, height,
                                      render_condition);
 }
@@ -869,6 +882,11 @@ tegra_create_sampler_view(struct pipe_context *pcontext,
 
    view->gpu = context->gpu->create_sampler_view(context->gpu, resource->gpu,
                                                  template);
+   if (!view->gpu) {
+      pipe_resource_reference(&view->base.texture, NULL);
+      free(view);
+      return NULL;
+   }
 
    /* use private reference count */
    view->gpu->reference.count += 100000000;
@@ -914,6 +932,17 @@ tegra_transfer_map(struct pipe_context *pcontext,
                                                  level, usage, box,
                                                  &transfer->gpu);
    }
+
+   /*
+    * Mapping can legitimately fail, e.g. PIPE_MAP_DONTBLOCK /
+    * PIPE_MAP_UNSYNCHRONIZED on a resource that is still busy on the GPU.
+    * Don't dereference a NULL transfer handle in that case.
+    */
+   if (!transfer->gpu) {
+      free(transfer);
+      return NULL;
+   }
+
    memcpy(&transfer->base, transfer->gpu, sizeof(*transfer->gpu));
    transfer->base.resource = NULL;
    pipe_resource_reference(&transfer->base.resource, presource);
@@ -1047,11 +1076,28 @@ tegra_set_global_binding(struct pipe_context *pcontext, unsigned int first,
                          uint32_t **handles)
 {
    struct tegra_context *context = to_tegra_context(pcontext);
+   struct pipe_resource *unwrapped[32];
+   struct pipe_resource **gpu_resources = NULL;
+   unsigned int i;
 
-   /* XXX unwrap resources */
+   if (resources && count > 0) {
+      if (count <= ARRAY_SIZE(unwrapped))
+         gpu_resources = unwrapped;
+      else
+         gpu_resources = malloc(count * sizeof(*gpu_resources));
 
-   context->gpu->set_global_binding(context->gpu, first, count, resources,
-                                    handles);
+      if (!gpu_resources)
+         return;
+
+      for (i = 0; i < count; i++)
+         gpu_resources[i] = tegra_resource_unwrap(resources[i]);
+   }
+
+   context->gpu->set_global_binding(context->gpu, first, count,
+                                    gpu_resources, handles);
+
+   if (gpu_resources && gpu_resources != unwrapped)
+      free(gpu_resources);
 }
 
 static void
@@ -1059,10 +1105,39 @@ tegra_launch_grid(struct pipe_context *pcontext,
                   const struct pipe_grid_info *info)
 {
    struct tegra_context *context = to_tegra_context(pcontext);
+   struct pipe_resource *unwrapped_globals[32];
+   struct pipe_resource **globals = NULL;
+   struct pipe_grid_info grid;
+   unsigned int i;
 
-   /* XXX unwrap info->indirect? */
+   if (info) {
+      memcpy(&grid, info, sizeof(grid));
+
+      grid.indirect = tegra_resource_unwrap(info->indirect);
+      grid.indirect_draw_count = tegra_resource_unwrap(info->indirect_draw_count);
+
+      if (info->globals && info->num_globals > 0) {
+         if (info->num_globals <= ARRAY_SIZE(unwrapped_globals))
+            globals = unwrapped_globals;
+         else
+            globals = malloc(info->num_globals * sizeof(*globals));
+
+         if (!globals)
+            return;
+
+         for (i = 0; i < info->num_globals; i++)
+            globals[i] = tegra_resource_unwrap(info->globals[i]);
+
+         grid.globals = globals;
+      }
+
+      info = &grid;
+   }
 
    context->gpu->launch_grid(context->gpu, info);
+
+   if (globals && globals != unwrapped_globals)
+      free(globals);
 }
 
 static void
@@ -1161,7 +1236,9 @@ tegra_create_texture_handle(struct pipe_context *pcontext,
 {
    struct tegra_context *context = to_tegra_context(pcontext);
 
-   return context->gpu->create_texture_handle(context->gpu, view, state);
+   return context->gpu->create_texture_handle(context->gpu,
+                                              tegra_sampler_view_unwrap(view),
+                                              state);
 }
 
 static void tegra_delete_texture_handle(struct pipe_context *pcontext,

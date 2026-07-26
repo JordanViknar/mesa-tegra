@@ -221,21 +221,43 @@ free:
    return NULL;
 }
 
-/* XXX */
 static struct pipe_resource *
 tegra_screen_resource_create_front(struct pipe_screen *pscreen,
                                    const struct pipe_resource *template,
                                    const void *map_front_private)
 {
    struct tegra_screen *screen = to_tegra_screen(pscreen);
-   struct pipe_resource *resource;
+   struct tegra_resource *resource;
 
-   resource = screen->gpu->resource_create_front(screen->gpu, template,
-                                                 map_front_private);
-   if (resource)
-      resource->screen = pscreen;
+   /*
+    * Front-buffer resources (classic non-modifier DRI2/GLX direct
+    * rendering) must be wrapped in a tegra_resource just like every
+    * other resource-creation entrypoint. Returning nouveau's raw
+    * pipe_resource here means any later call that treats it as a
+    * tegra_resource (to_tegra_resource()/tegra_resource_unwrap(), used
+    * throughout tegra_context.c) reinterprets nouveau-internal memory
+    * as tegra_resource fields.
+    */
+   resource = calloc(1, sizeof(*resource));
+   if (!resource)
+      return NULL;
 
-   return resource;
+   resource->gpu = screen->gpu->resource_create_front(screen->gpu, template,
+                                                       map_front_private);
+   if (!resource->gpu) {
+      free(resource);
+      return NULL;
+   }
+
+   memcpy(&resource->base, resource->gpu, sizeof(*resource->gpu));
+   pipe_reference_init(&resource->base.reference, 1);
+   resource->base.screen = &screen->base;
+
+   /* use private reference count for wrapped resources */
+   resource->gpu->reference.count += 100000000;
+   resource->refcount = 100000000;
+
+   return &resource->base;
 }
 
 static struct pipe_resource *
@@ -265,21 +287,35 @@ tegra_screen_resource_from_handle(struct pipe_screen *pscreen,
    return &resource->base;
 }
 
-/* XXX */
 static struct pipe_resource *
 tegra_screen_resource_from_user_memory(struct pipe_screen *pscreen,
                                        const struct pipe_resource *template,
                                        void *buffer)
 {
    struct tegra_screen *screen = to_tegra_screen(pscreen);
-   struct pipe_resource *resource;
+   struct tegra_resource *resource;
 
-   resource = screen->gpu->resource_from_user_memory(screen->gpu, template,
-                                                     buffer);
-   if (resource)
-      resource->screen = pscreen;
+   /* see comment in tegra_screen_resource_create_front() */
+   resource = calloc(1, sizeof(*resource));
+   if (!resource)
+      return NULL;
 
-   return resource;
+   resource->gpu = screen->gpu->resource_from_user_memory(screen->gpu,
+                                                           template, buffer);
+   if (!resource->gpu) {
+      free(resource);
+      return NULL;
+   }
+
+   memcpy(&resource->base, resource->gpu, sizeof(*resource->gpu));
+   pipe_reference_init(&resource->base.reference, 1);
+   resource->base.screen = &screen->base;
+
+   /* use private reference count for wrapped resources */
+   resource->gpu->reference.count += 100000000;
+   resource->refcount = 100000000;
+
+   return &resource->base;
 }
 
 static bool
@@ -454,6 +490,15 @@ tegra_screen_resource_create_with_modifiers(struct pipe_screen *pscreen,
    memcpy(&resource->base, resource->gpu, sizeof(*resource->gpu));
    pipe_reference_init(&resource->base.reference, 1);
    resource->base.screen = &screen->base;
+
+   /*
+    * Use private reference count for wrapped resources, same as
+    * tegra_screen_resource_create(). Without this, a resource allocated
+    * here (e.g. GBM/EGL window-system buffers) can be freed out from
+    * under an internal reference nouveau still holds on it.
+    */
+   resource->gpu->reference.count += 100000000;
+   resource->refcount = 100000000;
 
    return &resource->base;
 
