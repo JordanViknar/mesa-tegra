@@ -1182,7 +1182,11 @@ tegra_get_device_reset_status(struct pipe_context *pcontext)
 {
    struct tegra_context *context = to_tegra_context(pcontext);
 
-   return context->gpu->get_device_reset_status(context->gpu);
+   /* same optional-hook situation as tegra_set_device_reset_callback() */
+   if (context->gpu->get_device_reset_status)
+      return context->gpu->get_device_reset_status(context->gpu);
+
+   return PIPE_NO_RESET;
 }
 
 static void
@@ -1191,7 +1195,20 @@ tegra_set_device_reset_callback(struct pipe_context *pcontext,
 {
    struct tegra_context *context = to_tegra_context(pcontext);
 
-   context->gpu->set_device_reset_callback(context->gpu, cb);
+   /*
+    * set_device_reset_callback is an OPTIONAL pipe_context hook (see
+    * p_context.h). tegra_context_create() always registers this wrapper,
+    * so st/mesa's "if (pipe->set_device_reset_callback)" capability check
+    * always passes -- but the wrapped gpu context may leave its own hook
+    * NULL if it doesn't implement device-reset notifications. Calling
+    * through that unconditionally is a jump to address 0.
+    *
+    * This is exactly what crashes Firefox on startup: st_install_device_
+    * reset_callback() sees a non-NULL hook here and calls it, which then
+    * called straight through nouveau's NULL set_device_reset_callback.
+    */
+   if (context->gpu->set_device_reset_callback)
+      context->gpu->set_device_reset_callback(context->gpu, cb);
 }
 
 static void
@@ -1236,6 +1253,17 @@ tegra_create_texture_handle(struct pipe_context *pcontext,
 {
    struct tegra_context *context = to_tegra_context(pcontext);
 
+   /*
+    * Bindless texture/image handles are an optional feature (nvc0 only
+    * wires up this whole family when class_3d >= NVE4_3D_CLASS, matching
+    * PIPE_CAP_BINDLESS_TEXTURE); on chips below that threshold every hook
+    * in this family is NULL. Same failure mode as set_device_reset_
+    * callback: tegra always registers its wrapper, so guard the forward
+    * call instead of assuming the gpu context implements it.
+    */
+   if (!context->gpu->create_texture_handle)
+      return 0;
+
    return context->gpu->create_texture_handle(context->gpu,
                                               tegra_sampler_view_unwrap(view),
                                               state);
@@ -1246,7 +1274,8 @@ static void tegra_delete_texture_handle(struct pipe_context *pcontext,
 {
    struct tegra_context *context = to_tegra_context(pcontext);
 
-   context->gpu->delete_texture_handle(context->gpu, handle);
+   if (context->gpu->delete_texture_handle)
+      context->gpu->delete_texture_handle(context->gpu, handle);
 }
 
 static void tegra_make_texture_handle_resident(struct pipe_context *pcontext,
@@ -1254,13 +1283,18 @@ static void tegra_make_texture_handle_resident(struct pipe_context *pcontext,
 {
    struct tegra_context *context = to_tegra_context(pcontext);
 
-   context->gpu->make_texture_handle_resident(context->gpu, handle, resident);
+   if (context->gpu->make_texture_handle_resident)
+      context->gpu->make_texture_handle_resident(context->gpu, handle,
+                                                  resident);
 }
 
 static uint64_t tegra_create_image_handle(struct pipe_context *pcontext,
                                           const struct pipe_image_view *image)
 {
    struct tegra_context *context = to_tegra_context(pcontext);
+
+   if (!context->gpu->create_image_handle)
+      return 0;
 
    return context->gpu->create_image_handle(context->gpu, image);
 }
@@ -1270,7 +1304,8 @@ static void tegra_delete_image_handle(struct pipe_context *pcontext,
 {
    struct tegra_context *context = to_tegra_context(pcontext);
 
-   context->gpu->delete_image_handle(context->gpu, handle);
+   if (context->gpu->delete_image_handle)
+      context->gpu->delete_image_handle(context->gpu, handle);
 }
 
 static void tegra_make_image_handle_resident(struct pipe_context *pcontext,
@@ -1279,8 +1314,9 @@ static void tegra_make_image_handle_resident(struct pipe_context *pcontext,
 {
    struct tegra_context *context = to_tegra_context(pcontext);
 
-   context->gpu->make_image_handle_resident(context->gpu, handle, access,
-                                            resident);
+   if (context->gpu->make_image_handle_resident)
+      context->gpu->make_image_handle_resident(context->gpu, handle, access,
+                                               resident);
 }
 
 struct pipe_context *
