@@ -918,8 +918,16 @@ tegra_create_sampler_view(struct pipe_context *pcontext,
       return NULL;
    }
 
-   /* use private reference count */
-   view->gpu->reference.count += 100000000;
+   /*
+    * reference.count is documented as atomic (see struct pipe_reference
+    * in p_state.h) -- resources can be touched from multiple threads
+    * (e.g. Mesa's glthread, or driver-internal deferred cleanup running
+    * off a fence-signal callback). A plain += here is a non-atomic
+    * read-modify-write racing against every properly-atomic decrement
+    * elsewhere, and can lose an update, letting a still-referenced
+    * object's refcount reach zero early.
+    */
+   p_atomic_add(&view->gpu->reference.count, 100000000);
    view->refcount = 100000000;
 
    return &view->base;

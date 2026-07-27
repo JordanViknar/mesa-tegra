@@ -209,7 +209,7 @@ tegra_screen_resource_create(struct pipe_screen *pscreen,
    resource->base.screen = &screen->base;
 
    /* use private reference count for wrapped resources */
-   resource->gpu->reference.count += 100000000;
+   p_atomic_add(&resource->gpu->reference.count, 100000000);
    resource->refcount = 100000000;
 
    return &resource->base;
@@ -254,7 +254,7 @@ tegra_screen_resource_create_front(struct pipe_screen *pscreen,
    resource->base.screen = &screen->base;
 
    /* use private reference count for wrapped resources */
-   resource->gpu->reference.count += 100000000;
+   p_atomic_add(&resource->gpu->reference.count, 100000000);
    resource->refcount = 100000000;
 
    return &resource->base;
@@ -312,7 +312,7 @@ tegra_screen_resource_from_user_memory(struct pipe_screen *pscreen,
    resource->base.screen = &screen->base;
 
    /* use private reference count for wrapped resources */
-   resource->gpu->reference.count += 100000000;
+   p_atomic_add(&resource->gpu->reference.count, 100000000);
    resource->refcount = 100000000;
 
    return &resource->base;
@@ -497,7 +497,7 @@ tegra_screen_resource_create_with_modifiers(struct pipe_screen *pscreen,
     * here (e.g. GBM/EGL window-system buffers) can be freed out from
     * under an internal reference nouveau still holds on it.
     */
-   resource->gpu->reference.count += 100000000;
+   p_atomic_add(&resource->gpu->reference.count, 100000000);
    resource->refcount = 100000000;
 
    return &resource->base;
