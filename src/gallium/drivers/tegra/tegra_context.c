@@ -163,7 +163,8 @@ tegra_get_query_result_resource(struct pipe_context *pcontext,
    struct tegra_context *context = to_tegra_context(pcontext);
 
    context->gpu->get_query_result_resource(context->gpu, query, flags,
-                                           result_type, index, resource,
+                                           result_type, index,
+                                           tegra_resource_unwrap(resource),
                                            offset);
 }
 
@@ -626,6 +627,23 @@ tegra_set_shader_buffers(struct pipe_context *pcontext, mesa_shader_stage shader
                          unsigned writable_bitmask)
 {
    struct tegra_context *context = to_tegra_context(pcontext);
+   struct pipe_shader_buffer buf[PIPE_MAX_SHADER_BUFFERS];
+   unsigned i;
+
+   /*
+    * pipe_shader_buffer::buffer is a pipe_resource that may be a
+    * tegra_resource wrapper (SSBOs bound from application/WebRender
+    * buffer objects). Same unwrap requirement as every other resource-
+    * touching hook in this file -- see tegra_set_framebuffer_state.
+    */
+   if (count && buffers) {
+      memcpy(buf, buffers, count * sizeof(struct pipe_shader_buffer));
+
+      for (i = 0; i < count; i++)
+         buf[i].buffer = tegra_resource_unwrap(buf[i].buffer);
+
+      buffers = buf;
+   }
 
    context->gpu->set_shader_buffers(context->gpu, shader, start, count,
                                     buffers, writable_bitmask);
@@ -638,6 +656,18 @@ tegra_set_shader_images(struct pipe_context *pcontext, mesa_shader_stage shader,
                         const struct pipe_image_view *images)
 {
    struct tegra_context *context = to_tegra_context(pcontext);
+   struct pipe_image_view img[PIPE_MAX_SHADER_IMAGES];
+   unsigned i;
+
+   /* see comment in tegra_set_shader_buffers() */
+   if (count && images) {
+      memcpy(img, images, count * sizeof(struct pipe_image_view));
+
+      for (i = 0; i < count; i++)
+         img[i].resource = tegra_resource_unwrap(img[i].resource);
+
+      images = img;
+   }
 
    context->gpu->set_shader_images(context->gpu, shader, start, count,
                                    unbind_num_trailing_slots, images);
