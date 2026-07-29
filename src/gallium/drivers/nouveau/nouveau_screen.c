@@ -401,8 +401,13 @@ nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
    ret = nouveau_client_new(screen->device, &screen->client);
    if (ret)
       goto err;
+   /*
+    * Deliberately smaller than the original 512KB. With a large local
+    * buffer, a client can accumulate a lot of GPU work before Mesa is
+    * ever forced to submit it to the kernel.
+    */
    ret = nouveau_pushbuf_create(screen, NULL, screen->client, screen->channel,
-                                4, 512 * 1024, &screen->pushbuf);
+                                4, 32 * 1024, &screen->pushbuf);
    if (ret)
       goto err;
 
@@ -511,8 +516,9 @@ nouveau_context_init(struct nouveau_context *context, struct nouveau_screen *scr
    if (ret)
       return ret;
 
+   /* see comment on the screen->pushbuf creation above */
    ret = nouveau_pushbuf_create(screen, context, context->client, screen->channel,
-                                4, 512 * 1024, &context->pushbuf);
+                                4, 32 * 1024, &context->pushbuf);
    if (ret)
       return ret;
 
