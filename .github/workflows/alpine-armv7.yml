@@ -35,6 +35,7 @@ jobs:
 
           docker run --rm --privileged --platform linux/arm/v7 \
             -v "$GITHUB_WORKSPACE:/work" \
+            -v "$GITHUB_WORKSPACE/packaging/alpine/packages:/home/build/packages" \
             -w "/work/packaging/alpine" \
             cicirello/alpine-plus-plus:3.24 \
             bash -lc '
@@ -61,9 +62,11 @@ jobs:
               su build -c "abuild-keygen -an"
               install -D -m 0644 /home/build/.abuild/*.pub /etc/apk/keys/
 
-              chown -R build:abuild /home/build /work /var/cache/distfiles
+              chown -R build:abuild /home/build /work
 
               su build -c "cd /work/packaging/alpine/ && abuild checksum && abuild -r"
+
+              chown -R 1001:1001 /work
             '
 
       - name: Collect artifacts
@@ -71,7 +74,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          find "$GITHUB_WORKSPACE/packaging/alpine" -type f \( -name '*.apk' -o -name '*.apk.tar.*' \) -exec cp -t "$GITHUB_WORKSPACE/artifacts" {} +
+          find "$GITHUB_WORKSPACE/packaging/alpine/packages" -type f \( -name '*.apk' -o -name '*.apk.tar.*' \) -exec cp -t "$GITHUB_WORKSPACE/artifacts" {} +
 
       - uses: actions/upload-artifact@v7
         if: always()
