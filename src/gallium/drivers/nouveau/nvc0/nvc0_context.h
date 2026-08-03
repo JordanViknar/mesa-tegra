@@ -182,6 +182,17 @@ struct nvc0_context {
 
    struct nvc0_screen *screen;
 
+   /*
+    * Storage for the callback registered via pipe->set_device_reset_
+    * callback(). nvc0/nv50 has no mechanism (kernel or otherwise) to
+    * actually detect a channel/context reset yet -- see
+    * nvc0_get_device_reset_status(), which is why this is never invoked
+    * today -- but the pipe_context contract (see p_context.h) requires
+    * that a driver implementing set_device_reset_callback() store a copy
+    * of *cb rather than leave the hook unimplemented.
+    */
+   struct pipe_device_reset_callback device_reset_callback;
+
    void (*m2mf_copy_rect)(struct nvc0_context *,
                           const struct nv50_m2mf_rect *dst,
                           const struct nv50_m2mf_rect *src,

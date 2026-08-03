@@ -188,6 +188,29 @@ nvc0_get_device_reset_status(struct pipe_context *pipe)
 }
 
 static void
+nvc0_set_device_reset_callback(struct pipe_context *pipe,
+                                const struct pipe_device_reset_callback *cb)
+{
+   struct nvc0_context *nvc0 = nvc0_context(pipe);
+
+   /*
+    * Per p_context.h: "If the pointer is null, then no callback is set,
+    * otherwise a copy of the data should be made." We don't yet have any
+    * way to detect a device reset (nvc0_get_device_reset_status() above
+    * always reports PIPE_NO_RESET), so nvc0->device_reset_callback.reset
+    * is simply never invoked today. Storing it is still required so that
+    * callers -- like Gecko's GL state tracker, which unconditionally
+    * registers a callback on every context it creates -- have a valid
+    * hook to call instead of dereferencing NULL.
+    */
+   if (cb)
+      nvc0->device_reset_callback = *cb;
+   else
+      memset(&nvc0->device_reset_callback, 0,
+             sizeof(nvc0->device_reset_callback));
+}
+
+static void
 nvc0_context_unreference_resources(struct nvc0_context *nvc0)
 {
    unsigned s, i;
@@ -457,6 +480,7 @@ nvc0_create(struct pipe_screen *pscreen, void *priv, unsigned ctxflags)
    pipe->get_sample_position = nvc0_context_get_sample_position;
    pipe->emit_string_marker = nvc0_emit_string_marker;
    pipe->get_device_reset_status = nvc0_get_device_reset_status;
+   pipe->set_device_reset_callback = nvc0_set_device_reset_callback;
 
    nvc0_init_query_functions(nvc0);
    nvc0_init_surface_functions(nvc0);
