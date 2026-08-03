@@ -17,27 +17,21 @@ jobs:
     steps:
       # No need to checkout the repository here.
 
-      - name: Install dependencies
-        run: |
-          set -euxo pipefail
-          sudo apt-get update
-          sudo apt-get install -y docker.io wget tar
-
       - name: Fetch PKGBUILD inputs
         run: |
           set -euxo pipefail
-          install -d "$GITHUB_WORKSPACE/packaging"
+          install -d "$GITHUB_WORKSPACE/packaging/archlinuxarm"
 
           # Pull the mesa-git AUR snapshot, which contains related files
           wget -O /tmp/mesa-git.tar.gz 'https://aur.archlinux.org/cgit/aur.git/snapshot/mesa-git.tar.gz'
-          tar -xzf /tmp/mesa-git.tar.gz -C "$GITHUB_WORKSPACE/packaging" --strip-components=1
+          tar -xzf /tmp/mesa-git.tar.gz -C "$GITHUB_WORKSPACE/packaging/archlinuxarm" --strip-components=1
 
           # Pull the PKGBUILD from whichever branch actually triggered this run
-          wget -O "$GITHUB_WORKSPACE/packaging/PKGBUILD" \
-            "https://raw.githubusercontent.com/JordanViknar/mesa-tegra/refs/heads/${GITHUB_REF_NAME}/packaging/PKGBUILD"
+          wget -O "$GITHUB_WORKSPACE/packaging/archlinuxarm/PKGBUILD" \
+            "https://raw.githubusercontent.com/JordanViknar/mesa-tegra/refs/heads/${GITHUB_REF_NAME}/packaging/archlinuxarm/PKGBUILD"
 
           # Pin the PKGBUILD's own mesa source to the exact commit and branch
-          sed -i "s|#branch=tegra-fixes|#commit=${GITHUB_SHA}|" "$GITHUB_WORKSPACE/packaging/PKGBUILD"
+          sed -i "s|#branch=tegra-fixes|#commit=${GITHUB_SHA}|" "$GITHUB_WORKSPACE/packaging/archlinuxarm/PKGBUILD"
 
       - name: Restore ccache / pacman package cache
         uses: actions/cache@v6
@@ -57,11 +51,10 @@ jobs:
           mkdir -p ~/.cache/mesa-tegra-ci/ccache ~/.cache/mesa-tegra-ci/pacman-pkg
 
           docker run --rm --platform linux/arm/v7 \
-            -e MESA_WHICH_LLVM \
             -v "$GITHUB_WORKSPACE:/work" \
             -v "$HOME/.cache/mesa-tegra-ci/ccache:/home/build/.cache/ccache" \
             -v "$HOME/.cache/mesa-tegra-ci/pacman-pkg:/var/cache/pacman/pkg" \
-            -w /work/packaging \
+            -w /work/packaging/archlinuxarm \
             menci/archlinuxarm:base-devel \
             \
             bash -lc '
@@ -84,7 +77,7 @@ jobs:
 
               chown -R build:build /work /home/build/.cache/ccache
 
-              su build -c "cd /work/packaging && MESA_WHICH_LLVM=$MESA_WHICH_LLVM makepkg --syncdeps --noconfirm --cleanbuild --clean --log --ignorearch"
+              su build -c "cd /work/packaging/archlinuxarm && makepkg --syncdeps --noconfirm --cleanbuild --clean --log --ignorearch"
               
               chown -R 1001:1001 /work /home/build/.cache/ccache
             '
@@ -94,7 +87,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          find "$GITHUB_WORKSPACE/packaging" -maxdepth 1 -type f \( -name '*.pkg.tar.*' \) -exec cp -t "$GITHUB_WORKSPACE/artifacts" {} +
+          find "$GITHUB_WORKSPACE/packaging/archlinuxarm" -maxdepth 1 -type f \( -name '*.pkg.tar.*' \) -exec cp -t "$GITHUB_WORKSPACE/artifacts" {} +
 
       - uses: actions/upload-artifact@v7
         if: always()

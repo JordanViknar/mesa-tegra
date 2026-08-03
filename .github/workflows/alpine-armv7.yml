@@ -1,0 +1,81 @@
+name: Alpine Linux ARMv7 CI
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  alpine-armv7:
+    runs-on: ubuntu-26.04-arm
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # No need to checkout the repository here.
+
+      - name: Fetch APKBUILD inputs
+        run: |
+          set -euxo pipefail
+          install -d "$GITHUB_WORKSPACE/packaging/alpine"
+
+          # Go into folder
+          cd "$GITHUB_WORKSPACE/packaging/alpine"
+
+          # Get our APKBUILD from the branch that triggered this run, and pin the mesa source to the exact commit and branch
+          wget "https://raw.githubusercontent.com/JordanViknar/mesa-tegra/refs/heads/${GITHUB_REF_NAME}/packaging/alpine/APKBUILD"
+          sed -i "s|_gitref=\"tegra-fixes\"|_gitref=\"${GITHUB_SHA}\"|" "APKBUILD"
+
+      - name: Build inside ARMv7 container
+        run: |
+          set -euxo pipefail
+
+          docker run --rm --privileged --platform linux/arm/v7 \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w "/work/packaging/alpine" \
+            cicirello/alpine-plus-plus:3.24 \
+            bash -lc '
+              set -euxo pipefail
+
+              # Install dependencies
+              apk update
+              apk add --no-cache \
+                abuild \
+                abuild-rootbld \
+                alpine-sdk \
+                bash \
+                ccache \
+                git \
+                sudo \
+                tar \
+                wget
+
+              # Create a build user and group for abuild
+              addgroup -S abuild || true
+              adduser -D -h /home/build -G abuild build
+
+              # Configure abuild signing for the build user and trust the public key.
+              su build -c "abuild-keygen -an"
+              install -D -m 0644 /home/build/.abuild/*.pub /etc/apk/keys/
+
+              chown -R build:abuild /home/build /work /var/cache/distfiles
+
+              su build -c "cd /work/packaging/alpine/ && abuild checksum && abuild -r"
+            '
+
+      - name: Collect artifacts
+        if: always()
+        run: |
+          set -euxo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          find "$GITHUB_WORKSPACE/packaging/alpine" -type f \( -name '*.apk' -o -name '*.apk.tar.*' \) -exec cp -t "$GITHUB_WORKSPACE/artifacts" {} +
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: alpine-armv7-pkg
+          path: artifacts/
+          retention-days: 7
