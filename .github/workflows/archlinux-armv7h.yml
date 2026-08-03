@@ -39,9 +39,9 @@ jobs:
           path: |
             ~/.cache/mesa-tegra-ci/ccache
             ~/.cache/mesa-tegra-ci/pacman-pkg
-          key: mesa-tegra-armv7h-${{ github.sha }}
+          key: mesa-tegra-archlinuxarm-armv7h-${{ github.sha }}
           restore-keys: |
-            mesa-tegra-armv7h-
+            mesa-tegra-archlinuxarm-armv7h-
 
       - name: Build inside ARMv7 container
         env:

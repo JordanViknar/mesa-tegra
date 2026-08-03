@@ -29,21 +29,40 @@ jobs:
           wget "https://raw.githubusercontent.com/JordanViknar/mesa-tegra/refs/heads/${GITHUB_REF_NAME}/packaging/alpine/APKBUILD"
           sed -i "s|_gitref=\"tegra-fixes\"|_gitref=\"${GITHUB_SHA}\"|" "APKBUILD"
 
+      - name: Restore ccache / apk package cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/mesa-tegra-ci/ccache
+            ~/.cache/mesa-tegra-ci/apk-pkg
+          key: mesa-tegra-alpine-armv7-${{ github.sha }}
+          restore-keys: |
+            mesa-tegra-alpine-armv7-
+
       - name: Build inside ARMv7 container
         run: |
           set -euxo pipefail
+          mkdir -p ~/.cache/mesa-tegra-ci/ccache ~/.cache/mesa-tegra-ci/apk-pkg
 
           docker run --rm --privileged --platform linux/arm/v7 \
             -v "$GITHUB_WORKSPACE:/work" \
             -v "$GITHUB_WORKSPACE/packaging/alpine/packages:/home/build/packages" \
+            -v "$HOME/.cache/mesa-tegra-ci/ccache:/home/build/.cache/ccache" \
+            -v "$HOME/.cache/mesa-tegra-ci/apk-pkg:/var/cache/apk" \
             -w "/work/packaging/alpine" \
             cicirello/alpine-plus-plus:3.24 \
             bash -lc '
               set -euxo pipefail
 
+              # Point apk at a persistent package cache
+              if [ ! -L /etc/apk/cache ]; then
+                rm -rf /etc/apk/cache
+                ln -s /var/cache/apk /etc/apk/cache
+              fi
+
               # Install dependencies
               apk update
-              apk add --no-cache \
+              apk add \
                 abuild \
                 abuild-rootbld \
                 alpine-sdk \
@@ -62,11 +81,14 @@ jobs:
               su build -c "abuild-keygen -an"
               install -D -m 0644 /home/build/.abuild/*.pub /etc/apk/keys/
 
+              # Enable ccache for abuild builds
+              sed -i "s/#USE_CCACHE=1/USE_CCACHE=1/" /etc/abuild.conf
+
               chown -R build:abuild /home/build /work
 
-              su build -c "cd /work/packaging/alpine/ && abuild checksum && abuild -r"
+              su build -c "export CCACHE_DIR=/home/build/.cache/ccache && cd /work/packaging/alpine/ && abuild checksum && abuild -r"
 
-              chown -R 1001:1001 /work
+              chown -R 1001:1001 /work /home/build/.cache/ccache /var/cache/apk
             '
 
       - name: Collect artifacts
